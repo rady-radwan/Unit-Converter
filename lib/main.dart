@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'data/categories.dart';
 import 'format.dart';
 import 'settings.dart';
 import 'ui/category_page.dart';
+import 'ui/settings_dialog.dart';
+import 'window_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final settings = AppSettings();
   await settings.load();
+  await initWindow(settings);
   runApp(UnitConverterApp(settings: settings));
 }
 
@@ -21,13 +25,43 @@ class SettingsScope extends InheritedNotifier<AppSettings> {
       context.dependOnInheritedWidgetOfExactType<SettingsScope>()!.notifier!;
 }
 
+/// Fonts bundled with the app (work on Windows and Android).
+const bundledFonts = [
+  'Inter',
+  'Roboto',
+  'Open Sans',
+  'Montserrat',
+  'Lato',
+  'Work Sans',
+  'Josefin Sans',
+];
+
+/// Fonts that come with Windows.
+const windowsFonts = [
+  'Segoe UI',
+  'Bahnschrift',
+  'Calibri',
+  'Arial',
+  'Verdana',
+  'Tahoma',
+  'Trebuchet MS',
+  'Georgia',
+  'Cambria',
+  'Times New Roman',
+  'Consolas',
+];
+
+/// Design width the layout is drawn for; the window scales around it.
+const designWidth = 1150.0;
+
 const _seed = Color(0xFF0F6CBD);
 
-ThemeData _theme(Brightness b) {
+ThemeData _theme(Brightness b, String? font) {
   final scheme = ColorScheme.fromSeed(seedColor: _seed, brightness: b);
   return ThemeData(
     useMaterial3: true,
     colorScheme: scheme,
+    fontFamily: font,
     scaffoldBackgroundColor: b == Brightness.light ? const Color(0xFFF5F7FA) : null,
     inputDecorationTheme: InputDecorationTheme(
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
@@ -51,12 +85,65 @@ class UnitConverterApp extends StatelessWidget {
         builder: (context, _) => MaterialApp(
           title: 'Unit Converter',
           debugShowCheckedModeBanner: false,
-          theme: _theme(Brightness.light),
-          darkTheme: _theme(Brightness.dark),
+          theme: _theme(Brightness.light, settings.fontFamily),
+          darkTheme: _theme(Brightness.dark, settings.fontFamily),
           themeMode: settings.themeMode,
+          builder: (context, child) => _ScaledApp(settings: settings, child: child!),
           home: const HomePage(),
         ),
       ),
+    );
+  }
+}
+
+/// Scales the whole interface (boxes, text, menus) with the window size
+/// and the zoom setting, and adds Ctrl + / Ctrl − / Ctrl 0 shortcuts.
+class _ScaledApp extends StatelessWidget {
+  const _ScaledApp({required this.settings, required this.child});
+
+  final AppSettings settings;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final mq = MediaQuery.of(context);
+    var scale = settings.zoom;
+    if (settings.autoScale && isWindowsDesktop) {
+      scale *= (mq.size.width / designWidth).clamp(0.6, 2.2);
+    }
+    scale = scale.clamp(0.4, 4.0);
+
+    Widget content = child;
+    if ((scale - 1).abs() > 0.001) {
+      final logical = Size(mq.size.width / scale, mq.size.height / scale);
+      content = MediaQuery(
+        data: mq.copyWith(
+          size: logical,
+          padding: mq.padding / scale,
+          viewPadding: mq.viewPadding / scale,
+          viewInsets: mq.viewInsets / scale,
+        ),
+        child: SizedBox.expand(
+          child: FittedBox(
+            fit: BoxFit.fill,
+            alignment: Alignment.topLeft,
+            child: SizedBox(width: logical.width, height: logical.height, child: child),
+          ),
+        ),
+      );
+    }
+
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.equal, control: true): settings.zoomIn,
+        const SingleActivator(LogicalKeyboardKey.add, control: true): settings.zoomIn,
+        const SingleActivator(LogicalKeyboardKey.numpadAdd, control: true): settings.zoomIn,
+        const SingleActivator(LogicalKeyboardKey.minus, control: true): settings.zoomOut,
+        const SingleActivator(LogicalKeyboardKey.numpadSubtract, control: true): settings.zoomOut,
+        const SingleActivator(LogicalKeyboardKey.digit0, control: true): settings.zoomReset,
+        const SingleActivator(LogicalKeyboardKey.numpad0, control: true): settings.zoomReset,
+      },
+      child: content,
     );
   }
 }
@@ -85,7 +172,11 @@ class HomePage extends StatelessWidget {
           actions: [
             if (wide) const PrecisionControls(),
             const SizedBox(width: 8),
-            const _SettingsMenu(),
+            IconButton(
+              tooltip: 'Settings',
+              icon: const Icon(Icons.settings_outlined),
+              onPressed: () => showSettingsDialog(context),
+            ),
             const SizedBox(width: 8),
           ],
           bottom: TabBar(
@@ -142,81 +233,55 @@ class PrecisionControls extends StatelessWidget {
         const SizedBox(width: 6),
         const Text('Precision'),
         const SizedBox(width: 8),
-        Tooltip(
-          message: s.mode == PrecisionMode.decimals
-              ? 'Number of decimal places'
-              : 'Number of significant figures',
-          child: DropdownButton<int>(
-            value: s.precision,
-            underline: const SizedBox.shrink(),
-            borderRadius: BorderRadius.circular(10),
-            items: [
-              for (var i = s.minPrecision; i <= AppSettings.maxPrecision; i++)
-                DropdownMenuItem(value: i, child: Text('$i')),
-            ],
-            onChanged: (v) => s.setPrecision(v ?? s.precision),
-          ),
-        ),
+        PrecisionDropdown(settings: s),
         const SizedBox(width: 8),
-        SegmentedButton<PrecisionMode>(
-          showSelectedIcon: false,
-          style: const ButtonStyle(visualDensity: VisualDensity.compact),
-          segments: [
-            for (final m in PrecisionMode.values)
-              ButtonSegment(value: m, label: Text(m.label)),
-          ],
-          selected: {s.mode},
-          onSelectionChanged: (sel) => s.setMode(sel.first),
-        ),
+        PrecisionModeButton(settings: s),
       ],
     );
   }
 }
 
-class _SettingsMenu extends StatelessWidget {
-  const _SettingsMenu();
+class PrecisionDropdown extends StatelessWidget {
+  const PrecisionDropdown({super.key, required this.settings});
+
+  final AppSettings settings;
 
   @override
   Widget build(BuildContext context) {
-    final s = SettingsScope.of(context);
-    return PopupMenuButton<String>(
-      tooltip: 'Settings',
-      icon: const Icon(Icons.settings_outlined),
-      onSelected: (v) {
-        switch (v) {
-          case 'trim':
-            s.setTrimZeros(!s.trimZeros);
-          case 'group':
-            s.setGrouping(!s.grouping);
-          case 'system':
-            s.setThemeMode(ThemeMode.system);
-          case 'light':
-            s.setThemeMode(ThemeMode.light);
-          case 'dark':
-            s.setThemeMode(ThemeMode.dark);
-          case 'about':
-            showAboutDialog(
-              context: context,
-              applicationName: 'Unit Converter',
-              applicationVersion: '1.0.0',
-              applicationIcon: const Icon(Icons.swap_horizontal_circle, size: 40),
-              children: const [
-                Text('SI and Imperial / US unit conversions with the formula '
-                    'shown for every result.'),
-              ],
-            );
-        }
-      },
-      itemBuilder: (context) => [
-        CheckedPopupMenuItem(value: 'trim', checked: s.trimZeros, child: const Text('Hide trailing zeros')),
-        CheckedPopupMenuItem(value: 'group', checked: s.grouping, child: const Text('Thousands separator (1,000)')),
-        const PopupMenuDivider(),
-        CheckedPopupMenuItem(value: 'system', checked: s.themeMode == ThemeMode.system, child: const Text('Theme: System')),
-        CheckedPopupMenuItem(value: 'light', checked: s.themeMode == ThemeMode.light, child: const Text('Theme: Light')),
-        CheckedPopupMenuItem(value: 'dark', checked: s.themeMode == ThemeMode.dark, child: const Text('Theme: Dark')),
-        const PopupMenuDivider(),
-        const PopupMenuItem(value: 'about', child: Text('About')),
+    final s = settings;
+    return Tooltip(
+      message: s.mode == PrecisionMode.decimals
+          ? 'Number of decimal places'
+          : 'Number of significant figures',
+      child: DropdownButton<int>(
+        value: s.precision,
+        underline: const SizedBox.shrink(),
+        borderRadius: BorderRadius.circular(10),
+        items: [
+          for (var i = s.minPrecision; i <= AppSettings.maxPrecision; i++)
+            DropdownMenuItem(value: i, child: Text('$i')),
+        ],
+        onChanged: (v) => s.setPrecision(v ?? s.precision),
+      ),
+    );
+  }
+}
+
+class PrecisionModeButton extends StatelessWidget {
+  const PrecisionModeButton({super.key, required this.settings});
+
+  final AppSettings settings;
+
+  @override
+  Widget build(BuildContext context) {
+    return SegmentedButton<PrecisionMode>(
+      showSelectedIcon: false,
+      style: const ButtonStyle(visualDensity: VisualDensity.compact),
+      segments: [
+        for (final m in PrecisionMode.values) ButtonSegment(value: m, label: Text(m.label)),
       ],
+      selected: {settings.mode},
+      onSelectionChanged: (sel) => settings.setMode(sel.first),
     );
   }
 }

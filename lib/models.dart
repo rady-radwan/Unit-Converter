@@ -26,6 +26,7 @@ class Unit {
     required this.symbol,
     required this.system,
     this.factor = 1,
+    this.feetInches = false,
   });
 
   final String id;
@@ -35,6 +36,10 @@ class Unit {
 
   /// How many base units one of this unit equals (linear categories only).
   final double factor;
+
+  /// Shown and typed as feet + inches (e.g. "1 ft 2.17 in").
+  /// Its [factor] is one foot, so values are handled internally in feet.
+  final bool feetInches;
 }
 
 class UnitCategory {

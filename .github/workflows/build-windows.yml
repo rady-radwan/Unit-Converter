@@ -51,6 +51,11 @@ jobs:
             -replace '"OriginalFilename", "unit_converter.exe"', '"OriginalFilename", "UnitConverter.exe"' `
             -replace 'com\.rady', 'Rady Radwan' | Set-Content $f
 
+          # window_manager shows the window itself once it has the saved size
+          $f = 'windows/runner/flutter_window.cpp'
+          (Get-Content $f -Raw) -replace 'this->Show\(\);', '' | Set-Content $f
+          Select-String -Path $f -Pattern 'SetNextFrameCallback' -Context 0,2
+
           Copy-Item assets/icon/app_icon.ico windows/runner/resources/app_icon.ico -Force
           Select-String -Path windows/runner/main.cpp -Pattern 'window.Create|Size size'
           Select-String -Path windows/CMakeLists.txt -Pattern 'BINARY_NAME "'
@@ -86,17 +91,41 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem dist
 
-      - name: Smoke test (launch the app, type a value, take screenshots)
+      - name: Smoke test (launch the app, type in both boxes, take screenshots)
         shell: pwsh
         run: |
           Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          Add-Type @"
+          using System; using System.Runtime.InteropServices;
+          public struct RECT { public int Left, Top, Right, Bottom; }
+          public struct POINT { public int X, Y; }
+          public static class W {
+            [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+            [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint x, uint y, uint d, int e);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+            [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h, int x, int y, int w, int ht, bool r);
+            [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out RECT r);
+            [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref POINT p);
+          }
+          "@
+
           $p = Start-Process build/windows/x64/runner/Release/UnitConverter.exe -PassThru
-          Start-Sleep 12
+          Start-Sleep 14
           if ($p.HasExited) { Write-Error "App exited early (code $($p.ExitCode))"; exit 1 }
-          $p.Refresh(); Write-Host "Window title: '$($p.MainWindowTitle)'"
-          $wshell = New-Object -ComObject wscript.shell
-          $null = $wshell.AppActivate($p.Id)
-          Start-Sleep 1
+          $p.Refresh()
+          $h = $p.MainWindowHandle
+          Write-Host "Window title: '$($p.MainWindowTitle)'  handle: $h"
+          if ($h -eq [IntPtr]::Zero) { Write-Error "Window never became visible"; exit 1 }
+          [W]::MoveWindow($h, 0, 0, 1024, 728, $true) | Out-Null
+          [W]::SetForegroundWindow($h) | Out-Null
+          Start-Sleep 3
+
+          $rc = New-Object RECT; [W]::GetClientRect($h, [ref]$rc) | Out-Null
+          $pt = New-Object POINT; [W]::ClientToScreen($h, [ref]$pt) | Out-Null
+          $cw = $rc.Right - $rc.Left
+          $scale = [Math]::Min([Math]::Max($cw / 1150.0, 0.6), 2.2)
+          Write-Host "Client width $cw, scale $scale, origin $($pt.X),$($pt.Y)"
+
           function Shot($name) {
             $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
             $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
@@ -105,33 +134,42 @@ jobs:
             $bmp.Save("dist/$name.png", [System.Drawing.Imaging.ImageFormat]::Png)
             $g.Dispose(); $bmp.Dispose()
           }
-          Add-Type -Namespace W -Name U -MemberDefinition @'
-            [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
-            [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint x, uint y, uint d, int e);
-            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr h);
-          '@
-          function Click($x, $y) {
-            [W.U]::SetCursorPos($x, $y); Start-Sleep -Milliseconds 200
-            [W.U]::mouse_event(2, 0, 0, 0, 0); [W.U]::mouse_event(4, 0, 0, 0, 0)
-            Start-Sleep -Milliseconds 600
+          # Click at a point given in the app's own (unscaled) layout units
+          function Click($lx, $ly) {
+            $x = [int]($pt.X + $lx * $scale); $y = [int]($pt.Y + $ly * $scale)
+            [W]::SetCursorPos($x, $y); Start-Sleep -Milliseconds 250
+            [W]::mouse_event(2, 0, 0, 0, 0); [W]::mouse_event(4, 0, 0, 0, 0)
+            Start-Sleep -Milliseconds 700
           }
-          [W.U]::SetForegroundWindow($p.MainWindowHandle) | Out-Null
-          Start-Sleep 1
+          function TypeText($text) {
+            [System.Windows.Forms.SendKeys]::SendWait('{END}')
+            [System.Windows.Forms.SendKeys]::SendWait('{BACKSPACE 30}')
+            [System.Windows.Forms.SendKeys]::SendWait($text)
+            Start-Sleep 2
+          }
+
           Shot 'screenshot-1-start'
-          # Length tab: replace "1" with "25.4"
-          Click 250 240
-          [System.Windows.Forms.SendKeys]::SendWait('^a')
-          [System.Windows.Forms.SendKeys]::SendWait('25.4')
+          # Type in the TO box: 100 ft -> From shows meters
+          Click 700 198; TypeText '100'
+          Shot 'screenshot-2-type-in-to-box'
+          # 0.36 m -> Feet-inches
+          Click 150 198; TypeText '0.36'
+          Click 800 266; Start-Sleep 1
+          Shot 'screenshot-3a-unit-menu'
+          Click 800 314; Start-Sleep 2
+          Shot 'screenshot-3-feet-inches'
+          # Temperature tab, type 212 in the TO box
+          Click 460 80; Start-Sleep 2
+          Click 700 198; TypeText '212'
+          Shot 'screenshot-4-temperature'
+          # Settings window
+          Click 1118 28; Start-Sleep 2
+          Shot 'screenshot-5-settings'
+          # Smaller window -> everything scales down
+          [System.Windows.Forms.SendKeys]::SendWait('{ESC}'); Start-Sleep 1
+          [W]::MoveWindow($h, 0, 0, 760, 560, $true) | Out-Null
           Start-Sleep 2
-          Shot 'screenshot-2-typed'
-          # Temperature tab: type 100
-          Click 480 121
-          Start-Sleep 2
-          Click 250 240
-          [System.Windows.Forms.SendKeys]::SendWait('^a')
-          [System.Windows.Forms.SendKeys]::SendWait('100')
-          Start-Sleep 2
-          Shot 'screenshot-3-temperature'
+          Shot 'screenshot-6-small-window'
           if ($p.HasExited) { Write-Error "App crashed during the test"; exit 1 }
           Stop-Process -Id $p.Id -Force
 

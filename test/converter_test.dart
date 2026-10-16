@@ -178,4 +178,53 @@ void main() {
       expect(parseInput('abc'), isNull);
     });
   });
+
+  group('feet–inches', () {
+    const d2 = NumberStyle(precision: 2);
+    test('0.36 m shows as 1 ft 2.17 in', () {
+      final feet = conv('length', 'm', 'ftin', 0.36);
+      expect(formatFeetInches(feet, d2), '1 ft 2.17 in');
+    });
+
+    test('fractions and rounding up to the next foot', () {
+      expect(formatFeetInches(1 + 2.1875 / 12, const NumberStyle(inchFraction: 16)), '1 ft 2 3/16 in');
+      expect(formatFeetInches(0.5 / 12, const NumberStyle(inchFraction: 16)), '0 ft 1/2 in');
+      expect(formatFeetInches(5 + 11.999 / 12, d2), '6 ft 0 in');
+      expect(formatFeetInches(-(1 + 6 / 12), d2), '−1 ft 6 in');
+    });
+
+    test('parsing', () {
+      void p(String text, double feet) =>
+          expectClose(parseFeetInches(text)!, feet, rel: 1e-12);
+      p('1\' 2"', 1 + 2 / 12);
+      p('1 ft 2 in', 1 + 2 / 12);
+      p('1ft2in', 1 + 2 / 12);
+      p('5\' 6-1/2"', 5 + 6.5 / 12);
+      p('5 6', 5.5);
+      p('1.5', 1.5);
+      p('8"', 8 / 12);
+      p('14 in', 14 / 12);
+      p('3/4"', 0.75 / 12);
+      p('1 ft 2.17 in', 1 + 2.17 / 12);
+      p('1 ft 2 3/16 in', 1 + 2.1875 / 12);
+      p('-2 ft', -2);
+      expect(parseFeetInches('abc'), isNull);
+      expect(parseFeetInches(''), isNull);
+    });
+
+    test('formulas', () {
+      final c = cat('length');
+      expect(formulaFor(c, c.unit('m'), c.unit('ftin')).lines,
+          ['ft = m ÷ 0.3048', 'inches = (ft − whole feet) × 12']);
+      expect(formulaFor(c, c.unit('ftin'), c.unit('m')).lines,
+          ['ft = feet + inches ÷ 12', 'm = ft × 0.3048']);
+      expect(formulaFor(c, c.unit('ftin'), c.unit('ft')).lines, ['ft = feet + inches ÷ 12']);
+    });
+  });
+
+  test('plain numbers for copying / re-typing', () {
+    expect(plainNumber('1,234.5'), '1234.5');
+    expect(plainNumber('−6.2137 × 10⁻¹³'), '-6.2137e-13');
+    expect(parseInput('6.2 × 10¹²'), 6.2e12);
+  });
 }

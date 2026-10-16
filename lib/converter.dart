@@ -6,11 +6,33 @@ import 'models.dart';
 /// [template] uses `{x}` for the input value, e.g. "{x} ÷ 0.3048" or
 /// "{x} × 9/5 + 32".
 class Formula {
-  const Formula({required this.lhs, required this.template, required this.inputSymbol});
+  const Formula({
+    required this.lhs,
+    required this.template,
+    required this.inputSymbol,
+    this.before,
+    this.after,
+  });
 
   final String lhs;
   final String template;
   final String inputSymbol;
+
+  /// Extra step shown before the main formula (feet–inches input).
+  final String? before;
+
+  /// Extra step shown after the main formula (feet–inches output).
+  final String? after;
+
+  /// Every line of the formula, in order, for display.
+  List<String> get lines => [
+        if (before != null) before!,
+        if (!isIdentity || (before == null && after == null)) symbolic,
+        if (after != null) after!,
+      ];
+
+  /// One-line version for the small cards.
+  String get compact => lines.join('  →  ');
 
   /// Symbolic form: "ft = m ÷ 0.3048".
   String get symbolic => '$lhs = ${template.replaceAll('{x}', inputSymbol)}';
@@ -81,7 +103,27 @@ const Map<String, String> _temperatureTemplates = {
   'R>K': '{x} × 5/9',
 };
 
+const _feetInchesIn = 'ft = feet + inches ÷ 12';
+const _feetInchesOut = 'inches = (ft − whole feet) × 12';
+
 Formula formulaFor(UnitCategory c, Unit from, Unit to) {
+  if (from.feetInches || to.feetInches) {
+    // Work in decimal feet, then add the split / join step.
+    final foot = c.units.firstWhere((u) => u.id == 'ft');
+    final f0 = from.feetInches ? foot : from;
+    final t0 = to.feetInches ? foot : to;
+    final base = formulaFor(c, f0, t0);
+    if (from.feetInches && to.feetInches) {
+      return Formula(lhs: 'ft-in', template: '{x}', inputSymbol: 'ft-in');
+    }
+    return Formula(
+      lhs: base.lhs,
+      template: base.template,
+      inputSymbol: base.inputSymbol,
+      before: from.feetInches ? _feetInchesIn : null,
+      after: to.feetInches ? _feetInchesOut : null,
+    );
+  }
   String template;
   if (from.id == to.id) {
     template = '{x}';
@@ -111,6 +153,13 @@ Formula formulaFor(UnitCategory c, Unit from, Unit to) {
 /// "1 ft = 0.3048 m" — the definition behind a linear conversion.
 String? definitionLine(UnitCategory c, Unit from, Unit to) {
   if (c.kind != ConversionKind.linear || from.id == to.id) return null;
+  if (from.feetInches || to.feetInches) {
+    final foot = c.units.firstWhere((u) => u.id == 'ft');
+    final f0 = from.feetInches ? foot : from;
+    final t0 = to.feetInches ? foot : to;
+    if (f0.id == t0.id) return '1 ft = 12 in';
+    return definitionLine(c, f0, t0);
+  }
   final a = formatFactor(from.factor / to.factor);
   final b = formatFactor(to.factor / from.factor);
   return '1 ${from.symbol} = $a ${to.symbol}   ·   1 ${to.symbol} = $b ${from.symbol}';

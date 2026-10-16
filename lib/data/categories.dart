@@ -43,6 +43,7 @@ final List<UnitCategory> categories = [
       Unit(id: 'mil', name: 'Mil (thou)', symbol: 'mil', system: _i, factor: _inch / 1000),
       Unit(id: 'in', name: 'Inch', symbol: 'in', system: _i, factor: _inch),
       Unit(id: 'ft', name: 'Foot', symbol: 'ft', system: _i, factor: _foot),
+      Unit(id: 'ftin', name: 'Feet–inches', symbol: 'ft-in', system: _i, factor: _foot, feetInches: true),
       Unit(id: 'yd', name: 'Yard', symbol: 'yd', system: _i, factor: _yard),
       Unit(id: 'mi', name: 'Mile', symbol: 'mi', system: _i, factor: _mile),
       Unit(id: 'nmi', name: 'Nautical mile', symbol: 'nmi', system: _o, factor: 1852),
