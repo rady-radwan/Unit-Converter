@@ -94,12 +94,15 @@ Formula formulaFor(UnitCategory c, Unit from, Unit to) {
     } else {
       final times = formatFactor(ratio);
       final divide = formatFactor(1 / ratio);
-      // Show whichever form uses the shorter, cleaner number.
+      // Show whichever form uses the number with fewer significant digits.
       // e.g. m → ft:  "m ÷ 0.3048" instead of "m × 3.280839895".
-      // On a tie, prefer the number that is ≥ 1 (m → km: "÷ 1,000").
-      final useDivide = divide.length < times.length ||
-          (divide.length == times.length && ratio < 1);
-      template = useDivide ? '{x} ÷ $divide' : '{x} × $times';
+      // On a tie, prefer the number that is ≥ 1 (m → km: "÷ 1,000",
+      // m → µm: "× 1,000,000").
+      final dt = significantDigits(times);
+      final dd = significantDigits(divide);
+      final useDivide = dd < dt || (dd == dt && ratio < 1);
+      String wrap(String n) => n.contains('×') ? '($n)' : n;
+      template = useDivide ? '{x} ÷ ${wrap(divide)}' : '{x} × ${wrap(times)}';
     }
   }
   return Formula(lhs: to.symbol, template: template, inputSymbol: from.symbol);

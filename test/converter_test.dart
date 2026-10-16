@@ -131,6 +131,11 @@ void main() {
       expect(formula('length', 'ft', 'in'), 'in = ft × 12');
       expect(formula('length', 'in', 'ft'), 'ft = in ÷ 12');
       expect(formula('length', 'mi', 'km'), 'km = mi × 1.609344');
+      expect(formula('length', 'm', 'nm'), 'nm = m × 1,000,000,000');
+      expect(formula('length', 'm', 'um'), 'µm = m × 1,000,000');
+      expect(formula('length', 'mm', 'm'), 'm = mm ÷ 1,000');
+      expect(formula('area', 'ft2', 'm2'), 'm² = ft² × 0.09290304');
+      expect(formula('area', 'mi2', 'mm2'), 'mm² = mi² × (2.58998811 × 10¹²)');
     });
 
     test('temperature formulas', () {

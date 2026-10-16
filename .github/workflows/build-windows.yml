@@ -38,7 +38,7 @@ jobs:
           $f = 'windows/runner/main.cpp'
           (Get-Content $f -Raw) `
             -replace 'L"unit_converter"', 'L"Unit Converter"' `
-            -replace 'Size size\(\d+, \d+\)', 'Size size(1200, 860)' | Set-Content $f
+            -replace 'Size size\(\d+, \d+\)', 'Size size(1100, 720)' | Set-Content $f
 
           $f = 'windows/CMakeLists.txt'
           (Get-Content $f -Raw) -replace 'set\(BINARY_NAME "unit_converter"\)', 'set(BINARY_NAME "UnitConverter")' | Set-Content $f
@@ -105,10 +105,33 @@ jobs:
             $bmp.Save("dist/$name.png", [System.Drawing.Imaging.ImageFormat]::Png)
             $g.Dispose(); $bmp.Dispose()
           }
+          Add-Type -Namespace W -Name U -MemberDefinition @'
+            [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+            [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint x, uint y, uint d, int e);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr h);
+          '@
+          function Click($x, $y) {
+            [W.U]::SetCursorPos($x, $y); Start-Sleep -Milliseconds 200
+            [W.U]::mouse_event(2, 0, 0, 0, 0); [W.U]::mouse_event(4, 0, 0, 0, 0)
+            Start-Sleep -Milliseconds 600
+          }
+          [W.U]::SetForegroundWindow($p.MainWindowHandle) | Out-Null
+          Start-Sleep 1
           Shot 'screenshot-1-start'
-          [System.Windows.Forms.SendKeys]::SendWait('{BACKSPACE}25')
+          # Length tab: replace "1" with "25.4"
+          Click 250 240
+          [System.Windows.Forms.SendKeys]::SendWait('^a')
+          [System.Windows.Forms.SendKeys]::SendWait('25.4')
           Start-Sleep 2
           Shot 'screenshot-2-typed'
+          # Temperature tab: type 100
+          Click 480 121
+          Start-Sleep 2
+          Click 250 240
+          [System.Windows.Forms.SendKeys]::SendWait('^a')
+          [System.Windows.Forms.SendKeys]::SendWait('100')
+          Start-Sleep 2
+          Shot 'screenshot-3-temperature'
           if ($p.HasExited) { Write-Error "App crashed during the test"; exit 1 }
           Stop-Process -Id $p.Id -Force
 

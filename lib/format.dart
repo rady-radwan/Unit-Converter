@@ -119,10 +119,26 @@ String formatNumber(double v, NumberStyle style) {
 String formatFactor(double v) {
   if (v == 0) return '0';
   final abs = v.abs();
-  if (abs >= 1e12 || abs < 1e-6) return _scientific(v, 9, true);
+  if (abs >= 1e12 || abs < 1e-6) {
+    final sci = _scientific(v, 9, true);
+    // "1 × 10⁻⁹" → "10⁻⁹"
+    return sci.startsWith('1 × ') ? sci.substring(4) : sci;
+  }
   final rounded = double.parse(v.toStringAsPrecision(10));
   final decimals = (9 - _exponent(rounded.abs())).clamp(0, 20);
   return _minus(_group(_trim(rounded.toStringAsFixed(decimals))));
+}
+
+/// How many significant digits a formatted factor has
+/// ("0.3048" → 4, "1,000,000" → 1, "3.280839895" → 10).
+int significantDigits(String formatted) {
+  if (formatted.contains('10')) {
+    // scientific forms count as long so plain numbers win
+    if (formatted.contains('×') || RegExp(r'10[⁻⁰¹²³⁴⁵⁶⁷⁸⁹]').hasMatch(formatted)) return 99;
+  }
+  final digits = formatted.replaceAll(RegExp(r'[^0-9]'), '');
+  final core = digits.replaceFirst(RegExp(r'^0+'), '').replaceFirst(RegExp(r'0+$'), '');
+  return core.isEmpty ? 1 : core.length;
 }
 
 /// Parses what the user typed. Accepts "1,234.5", "-40", "2.5e3", " 7 ".
