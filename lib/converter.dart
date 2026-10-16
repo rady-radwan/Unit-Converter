@@ -1,0 +1,114 @@
+import 'format.dart';
+import 'models.dart';
+
+/// A formula such as "ft = m ÷ 0.3048".
+///
+/// [template] uses `{x}` for the input value, e.g. "{x} ÷ 0.3048" or
+/// "{x} × 9/5 + 32".
+class Formula {
+  const Formula({required this.lhs, required this.template, required this.inputSymbol});
+
+  final String lhs;
+  final String template;
+  final String inputSymbol;
+
+  /// Symbolic form: "ft = m ÷ 0.3048".
+  String get symbolic => '$lhs = ${template.replaceAll('{x}', inputSymbol)}';
+
+  /// Same formula with the typed number put in: "10 ÷ 0.3048".
+  String substituted(String value) {
+    final shown = value.startsWith('−') || value.startsWith('-') ? '($value)' : value;
+    return template.replaceAll('{x}', shown);
+  }
+
+  bool get isIdentity => template == '{x}';
+}
+
+// ───────────────────────── Conversion ─────────────────────────
+
+double convert(UnitCategory c, Unit from, Unit to, double x) {
+  if (from.id == to.id) return x;
+  return switch (c.kind) {
+    ConversionKind.linear => x * from.factor / to.factor,
+    ConversionKind.temperature => _fromKelvin(to.id, _toKelvin(from.id, x)),
+  };
+}
+
+double _toKelvin(String id, double x) {
+  switch (id) {
+    case 'C':
+      return x + 273.15;
+    case 'F':
+      return (x + 459.67) * 5 / 9;
+    case 'R':
+      return x * 5 / 9;
+    default: // K
+      return x;
+  }
+}
+
+double _fromKelvin(String id, double k) {
+  switch (id) {
+    case 'C':
+      return k - 273.15;
+    case 'F':
+      return k * 9 / 5 - 459.67;
+    case 'R':
+      return k * 9 / 5;
+    default: // K
+      return k;
+  }
+}
+
+/// Returns the value in kelvin (temperature category only) — used to warn
+/// about values below absolute zero.
+double toKelvin(Unit from, double x) => _toKelvin(from.id, x);
+
+// ─────────────────────────── Formulas ───────────────────────────
+
+const Map<String, String> _temperatureTemplates = {
+  'C>F': '{x} × 9/5 + 32',
+  'F>C': '({x} − 32) × 5/9',
+  'C>K': '{x} + 273.15',
+  'K>C': '{x} − 273.15',
+  'F>K': '({x} − 32) × 5/9 + 273.15',
+  'K>F': '({x} − 273.15) × 9/5 + 32',
+  'C>R': '({x} + 273.15) × 9/5',
+  'R>C': '{x} × 5/9 − 273.15',
+  'F>R': '{x} + 459.67',
+  'R>F': '{x} − 459.67',
+  'K>R': '{x} × 9/5',
+  'R>K': '{x} × 5/9',
+};
+
+Formula formulaFor(UnitCategory c, Unit from, Unit to) {
+  String template;
+  if (from.id == to.id) {
+    template = '{x}';
+  } else if (c.kind == ConversionKind.temperature) {
+    template = _temperatureTemplates['${from.id}>${to.id}']!;
+  } else {
+    final ratio = from.factor / to.factor;
+    if ((ratio - 1).abs() < 1e-12) {
+      template = '{x}';
+    } else {
+      final times = formatFactor(ratio);
+      final divide = formatFactor(1 / ratio);
+      // Show whichever form uses the shorter, cleaner number.
+      // e.g. m → ft:  "m ÷ 0.3048" instead of "m × 3.280839895".
+      // On a tie, prefer the number that is ≥ 1 (m → km: "÷ 1,000").
+      final useDivide = divide.length < times.length ||
+          (divide.length == times.length && ratio < 1);
+      template = useDivide ? '{x} ÷ $divide' : '{x} × $times';
+    }
+  }
+  return Formula(lhs: to.symbol, template: template, inputSymbol: from.symbol);
+}
+
+/// "1 ft = 0.3048 m" — the definition behind a linear conversion.
+String? definitionLine(UnitCategory c, Unit from, Unit to) {
+  if (c.kind != ConversionKind.linear || from.id == to.id) return null;
+  final a = formatFactor(from.factor / to.factor);
+  final b = formatFactor(to.factor / from.factor);
+  return '1 ${from.symbol} = $a ${to.symbol}   ·   1 ${to.symbol} = $b ${from.symbol}';
+}
