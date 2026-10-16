@@ -156,10 +156,14 @@ jobs:
           path: dist/*
 
       - name: Publish GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          name: Unit Converter ${{ github.ref_name }}
+          tag_name: v${{ env.APP_VERSION }}
+          target_commitish: ${{ github.sha }}
+          name: Unit Converter v${{ env.APP_VERSION }}
+          make_latest: true
+          overwrite_files: true
           files: |
             dist/UnitConverter-Setup-*.exe
             dist/UnitConverter-Portable-*.zip

@@ -17,7 +17,8 @@ A portable `.zip` is also attached.
 
 ## How it is built
 GitHub Actions (`.github/workflows/build-windows.yml`) runs the unit tests, builds the Windows app,
-bundles the Visual C++ runtime, and packages it with Inno Setup. Pushing a tag like `v1.0.0` publishes a release.
+bundles the Visual C++ runtime, packages it with Inno Setup, and publishes the release `v<version>` from `pubspec.yaml`.
+To ship a new version, bump `version:` in `pubspec.yaml` and push to `main`.
 
 ## Project layout
 ```
