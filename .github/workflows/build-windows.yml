@@ -86,6 +86,47 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem dist
 
+      - name: Smoke test (launch the app, type a value, take screenshots)
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $p = Start-Process build/windows/x64/runner/Release/UnitConverter.exe -PassThru
+          Start-Sleep 12
+          if ($p.HasExited) { Write-Error "App exited early (code $($p.ExitCode))"; exit 1 }
+          $p.Refresh(); Write-Host "Window title: '$($p.MainWindowTitle)'"
+          $wshell = New-Object -ComObject wscript.shell
+          $null = $wshell.AppActivate($p.Id)
+          Start-Sleep 1
+          function Shot($name) {
+            $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+            $bmp.Save("dist/$name.png", [System.Drawing.Imaging.ImageFormat]::Png)
+            $g.Dispose(); $bmp.Dispose()
+          }
+          Shot 'screenshot-1-start'
+          [System.Windows.Forms.SendKeys]::SendWait('{BACKSPACE}25')
+          Start-Sleep 2
+          Shot 'screenshot-2-typed'
+          if ($p.HasExited) { Write-Error "App crashed during the test"; exit 1 }
+          Stop-Process -Id $p.Id -Force
+
+      - name: Save build to the 'builds' branch
+        if: github.ref == 'refs/heads/main'
+        shell: pwsh
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          $tmp = Join-Path $env:RUNNER_TEMP 'builds'
+          New-Item -ItemType Directory -Force $tmp | Out-Null
+          Copy-Item dist/* $tmp
+          Set-Location $tmp
+          git init -b builds
+          git add .
+          git commit -m "Build $env:APP_VERSION from $env:GITHUB_SHA"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" builds
+
       - uses: actions/upload-artifact@v4
         with:
           name: UnitConverter-Windows-${{ env.APP_VERSION }}
